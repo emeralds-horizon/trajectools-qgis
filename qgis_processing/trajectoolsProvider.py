@@ -16,9 +16,12 @@ from .splitTrajectoriesAlgorithm import (
 )
 from .overlayAlgorithm import (
     ClipTrajectoriesByExtentAlgorithm,
-    ClipTrajectoriesByPolygonLayer,
+    ClipTrajectoriesByPolygonLayerAlgorithm,
+    IntersectWithPolygonLayerAlgorithm,
 )
 from .extractPtsAlgorithm import ExtractODPtsAlgorithm, ExtractStopsAlgorithm
+from .privacyAttackAlgorithm import HomeWorkAttack
+from .gtfsAlgorithm import GtfsAlgorithm
 
 pluginPath = os.path.dirname(__file__)
 
@@ -57,10 +60,19 @@ class TrajectoolsProvider(QgsProcessingProvider):
             TemporalSplitterAlgorithm(),
             StopSplitterAlgorithm(),
             ClipTrajectoriesByExtentAlgorithm(),
-            ClipTrajectoriesByPolygonLayer(),
+            ClipTrajectoriesByPolygonLayerAlgorithm(),
+            IntersectWithPolygonLayerAlgorithm(),
             ExtractODPtsAlgorithm(),
             ExtractStopsAlgorithm(),
         ]
+        try:  # skmob-based algs
+            algs.append(HomeWorkAttack())
+        except ImportError:
+            pass
+        try:  # gtfs_functions-based algs
+            algs.append(GtfsAlgorithm())
+        except ImportError:
+            pass
         return algs
 
     def loadAlgorithms(self):
