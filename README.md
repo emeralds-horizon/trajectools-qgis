@@ -1,6 +1,11 @@
 # WP4 Emerald: T4.1 - Trajectory Data / Travel Time Analysis -- Trajectools
 
-[![View plugin repo](https://img.shields.io/badge/QGIS-Plugin%20repo-green.svg)](https://plugins.qgis.org/plugins/processing_trajectory/)
+<a href="https://codeberg.org/movingpandas/trajectools">
+    <img alt="Get it on Codeberg" src="https://get-it-on.codeberg.org/get-it-on-blue-on-white.png" height="60" align="right">
+</a>
+
+[![QGIS Plugin Repo](https://img.shields.io/badge/QGIS-Plugin%20repo-green.svg)](https://plugins.qgis.org/plugins/processing_trajectory/)
+[![Issue Tracker](https://img.shields.io/badge/Issue_tracker-Codeberg-blue.svg)](https://codeberg.org/movingpandas/trajectools/issues) 
 [![Zenodo badge](https://zenodo.org/badge/DOI/10.5281/zenodo.13847642.svg)](https://doi.org/10.5281/zenodo.13847642)
 
 ## Description
@@ -24,15 +29,15 @@ Related repositories include:
 ## Requirements
 Running these models requires QGIS (a popular open source geographic information system) with MovingPandas (a Python library for movement data analysis) and the QGIS Trajectools plugin.
 
-Trajectools requires [MovingPandas](https://github.com/movingpandas/movingpandas) (a Python library for movement data analysis) and optionally integrates [scikit-mobility](https://scikit-mobility.github.io/scikit-mobility/) (for privacy tests), [stonesoup](https://stonesoup.readthedocs.io/) (for smoothing), and [gtfs_functions](https://github.com/Bondify/gtfs_functions) (for GTFS data support). 
+Trajectools requires [MovingPandas](https://github.com/movingpandas/movingpandas) >= 0.22.3 and optionally integrates [scikit-mobility](https://scikit-mobility.github.io/scikit-mobility/) (for privacy tests), [stonesoup](https://stonesoup.readthedocs.io/) (for smoothing), and [gtfs_functions](https://github.com/Bondify/gtfs_functions) (for GTFS data support). 
 
 The recommended way to install these dependencies is through conda/mamba:
 
 ```
-(base) conda create -n qgis -c conda-forge python=3.9 
+(base) conda create -n qgis -c conda-forge python=3.11 
 (base) conda activate qgis
 (qgis) mamba install -c conda-forge qgis movingpandas scikit-mobility stonesoup
-(qgis) pip install gtfs_functions h3==3.7.7
+(qgis) pip install gtfs_functions h3
 ```
 
 (More details: https://anitagraser.com/2023/01/21/pyqgis-jupyter-notebooks-on-windows-using-conda/)
@@ -74,10 +79,17 @@ The individual Trajectools algorithms are flexible and modular and can therefore
 ![Trajectools GTFS Extract Segments](https://github.com/user-attachments/assets/62a6e60c-dedc-4e90-8059-2679302346db)
 
 
+## Presentations
+
+[**Trajectools: analyzing anything that moves.** QGIS User Conference 2025, 2-3 June 2025, Norrköping, Sweden.](https://youtu.be/T7haF1DPy2U)
+
+[![Trajectools presentation at QGISUC2025](screenshots/trajectoos-qgisuc25.png)](https://youtu.be/T7haF1DPy2U)
+
+
 ## Authors
 AIT
 
-###  Citation information
+## Citation information
 
 Please cite [0] when using Trajectools in your research and reference the appropriate release version using the Zenodo DOI: https://doi.org/10.5281/zenodo.13847642
 

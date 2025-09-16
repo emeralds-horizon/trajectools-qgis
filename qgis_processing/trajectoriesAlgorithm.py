@@ -1,7 +1,7 @@
 import os
 import sys
 
-from qgis.PyQt.QtCore import QCoreApplication, QVariant
+from qgis.PyQt.QtCore import QCoreApplication, QVariant, QDateTime
 from qgis.PyQt.QtGui import QIcon
 from qgis.core import (
     QgsProcessing,
@@ -13,6 +13,7 @@ from qgis.core import (
     QgsWkbTypes,
     QgsProcessingParameterString,
     QgsProcessingParameterNumber,
+    QgsProcessingParameterBoolean,
     QgsField,
     QgsFields,
     QgsFeature,
@@ -22,7 +23,12 @@ from qgis.core import (
 
 sys.path.append("..")
 
-from .qgisUtils import tc_from_pt_layer, feature_from_gdf_row, df_from_pt_layer
+from .qgisUtils import (
+    set_multiprocess_path,
+    tc_from_pt_layer, 
+    feature_from_gdf_row, 
+    df_from_pt_layer, 
+)
 
 pluginPath = os.path.dirname(__file__)
 
@@ -34,16 +40,38 @@ TIME_FACTOR = {
     "a": 3600 * 24 * 365,
 }
 
+CPU_COUNT = os.cpu_count()
+
+help_str_base = (
+    "<p><b>Trajectory ID field</b> is the input layer field containing the ID "
+    "of the moving objects. If no field is specified, all input features are "
+    "assigned to a single moving object. </p>"
+    "<p><b>Timestamp field</b> is the input layer field the position time. "
+    "Datetime fields are preferred but we will attempt to parse string fields "
+    "using Pandas' built-in parser.</p>")
+help_str_traj = (
+    "<p><b>Minimum trajectory length</b> is the desired minimum length of output "
+    "trajectories, calculated using CRS units, except if the CRS is geographic "
+    "(e.g. EPSG:4326 WGS84) then length is calculated in meters. "
+    "(Shorter trajectories are discarded.)</p>"      
+    "<p><b>Speed</b> is calculated based on the input layer CRS information and "
+    "converted to the desired speed units. For more info on the supported units, "
+    "see https://movingpandas.org/units.</p>"
+    "<p><b>Direction</b> is calculated between consecutive locations. Direction "
+    "values are in degrees, starting North turning clockwise.</p>"
+)
 
 class TrajectoriesAlgorithm(QgsProcessingAlgorithm):
     INPUT = "INPUT"
     TRAJ_ID_FIELD = "TRAJ_ID_FIELD"
     TIMESTAMP_FIELD = "TIME_FIELD"
+    ADD_METRICS = "ADD_METRICS"
     SPEED_UNIT = "SPEED_UNIT"
     MIN_LENGTH = "MIN_LENGTH"
 
     def __init__(self):
         super().__init__()
+        set_multiprocess_path()
 
     def icon(self):
         return QIcon(os.path.join(pluginPath, "icons", "mpd.png"))
@@ -56,6 +84,10 @@ class TrajectoriesAlgorithm(QgsProcessingAlgorithm):
 
     def createInstance(self):
         return type(self)()
+
+    def flags(self):
+        super().flags()
+        return  QgsProcessingAlgorithm.FlagNoThreading
 
     def initAlgorithm(self, config=None):
         self.addParameter(
@@ -73,7 +105,7 @@ class TrajectoriesAlgorithm(QgsProcessingAlgorithm):
                 parentLayerParameterName=self.INPUT,
                 type=QgsProcessingParameterField.Any,
                 allowMultiple=False,
-                optional=False,
+                optional=True,
             )
         )
         self.addParameter(
@@ -87,23 +119,7 @@ class TrajectoriesAlgorithm(QgsProcessingAlgorithm):
                 optional=False,
             )
         )
-        self.addParameter(
-            QgsProcessingParameterString(
-                name=self.SPEED_UNIT,
-                description=self.tr("Speed units (e.g. km/h, m/s)"),
-                defaultValue="km/h",
-                optional=False,
-            )
-        )
-        self.addParameter(
-            QgsProcessingParameterNumber(
-                name=self.MIN_LENGTH,
-                description=self.tr("Minimum trajectory length"),
-                defaultValue=0,
-                # optional=True,
-                minValue=0,
-            )
-        )
+
 
     def create_df(self, parameters, context):
         self.prepare_parameters(parameters, context)
@@ -126,6 +142,7 @@ class TrajectoriesAlgorithm(QgsProcessingAlgorithm):
             parameters, self.SPEED_UNIT, context
         ).split("/")
         self.min_length = self.parameterAsDouble(parameters, self.MIN_LENGTH, context)
+        self.add_metrics = self.parameterAsBoolean(parameters, self.ADD_METRICS, context)
 
     def create_tc(self, parameters, context):
         self.prepare_parameters(parameters, context)
@@ -140,8 +157,13 @@ class TrajectoriesAlgorithm(QgsProcessingAlgorithm):
                 "The resulting trajectory collection is empty. Check that the trajectory ID and timestamp fields have been configured correctly."
             )
 
-        tc.add_speed(units=tuple(self.speed_units), overwrite=True)
-        tc.add_direction(overwrite=True)
+        if self.add_metrics:
+            try:
+                tc.add_speed(units=tuple(self.speed_units), overwrite=True, n_processes=CPU_COUNT)
+                tc.add_direction(overwrite=True, n_processes=CPU_COUNT)
+            except TypeError:  # None values cause TypeError: cannot pickle 'QVariant' object, see issue #93
+                raise TypeError("TypeError: cannot pickle 'QVariant' object. This error is usually caused by None values in input layer fields. Try to remove None values or run without Add movement metrics.")
+
         return tc, crs
 
     def get_pt_fields(self, fields_to_add=[]):
@@ -149,9 +171,13 @@ class TrajectoriesAlgorithm(QgsProcessingAlgorithm):
         for field in self.input_layer.fields():
             if field.name() == "fid":
                 continue
+            elif field.name() == "geometry":
+                continue  # Fixes Error when attribute table contains geometry column #44
             elif field.name() == self.traj_id_field:
                 # we need to make sure the ID field is String
                 fields.append(QgsField(self.traj_id_field, QVariant.String))
+            elif field.name() == self.timestamp_field:
+                fields.append(QgsField(self.timestamp_field, QVariant.DateTime))
             else:
                 fields.append(field)
         for field in fields_to_add:
@@ -193,16 +219,37 @@ class TrajectoryManipulationAlgorithm(TrajectoriesAlgorithm):
                 optional=True,
             )
         )
+        self.addParameter(
+            QgsProcessingParameterBoolean(
+                name=self.ADD_METRICS,
+                description=self.tr("Add movement metrics (speed, direction)"),
+                defaultValue=True,
+                optional=False,
+            )
+        )        
+        self.addParameter(
+            QgsProcessingParameterString(
+                name=self.SPEED_UNIT,
+                description=self.tr("Speed units (e.g. km/h, m/s)"),
+                defaultValue="km/h",
+                optional=False,
+            )
+        )
+        self.addParameter(
+            QgsProcessingParameterNumber(
+                name=self.MIN_LENGTH,
+                description=self.tr("Minimum trajectory length"),
+                defaultValue=0,
+                # optional=True,
+                minValue=0,
+            )
+        )
 
     def processAlgorithm(self, parameters, context, feedback):
         tc, crs = self.create_tc(parameters, context)
-
         self.setup_pt_sink(parameters, context, tc, crs)
-
         self.setup_traj_sink(parameters, context, crs)
-
         self.processTc(tc, parameters, context)
-
         return {self.OUTPUT_PTS: self.dest_pts, self.OUTPUT_TRAJS: self.dest_trajs}
 
     def setup_traj_sink(self, parameters, context, crs):
@@ -220,12 +267,13 @@ class TrajectoryManipulationAlgorithm(TrajectoriesAlgorithm):
         )
 
     def setup_pt_sink(self, parameters, context, tc, crs):
-        self.fields_pts = self.get_pt_fields(
-            [
+        fields_to_add = []
+        if self.add_metrics:
+            fields_to_add = [
                 QgsField(tc.get_speed_col(), QVariant.Double),
                 QgsField(tc.get_direction_col(), QVariant.Double),
-            ],
-        )
+            ]
+        self.fields_pts = self.get_pt_fields(fields_to_add)
         (self.sink_pts, self.dest_pts) = self.parameterAsSink(
             parameters,
             self.OUTPUT_PTS,
@@ -239,8 +287,9 @@ class TrajectoryManipulationAlgorithm(TrajectoriesAlgorithm):
         pass  # needs to be implemented by each splitter
 
     def postProcessAlgorithm(self, context, feedback):
-        pts_layer = QgsProcessingUtils.mapLayerFromString(self.dest_pts, context)
-        pts_layer.loadNamedStyle(os.path.join(pluginPath, "styles", "pts.qml"))
+        if self.add_metrics:
+            pts_layer = QgsProcessingUtils.mapLayerFromString(self.dest_pts, context)
+            pts_layer.loadNamedStyle(os.path.join(pluginPath, "styles", "pts.qml"))
         traj_layer = QgsProcessingUtils.mapLayerFromString(self.dest_trajs, context)
         traj_layer.loadNamedStyle(os.path.join(pluginPath, "styles", "traj.qml"))
         return {self.OUTPUT_PTS: self.dest_pts, self.OUTPUT_TRAJS: self.dest_trajs}
@@ -250,8 +299,8 @@ class TrajectoryManipulationAlgorithm(TrajectoriesAlgorithm):
         speed_units = f"{self.speed_units[0]}{self.speed_units[1]}"
         fields = QgsFields()
         fields.append(QgsField(self.traj_id_field, QVariant.String))
-        fields.append(QgsField("start_time", QVariant.String))
-        fields.append(QgsField("end_time", QVariant.String))
+        fields.append(QgsField("start_time", QVariant.DateTime))
+        fields.append(QgsField("end_time", QVariant.DateTime))
         fields.append(QgsField("duration_seconds", QVariant.Double))
         fields.append(QgsField(f"length_{length_units}", QVariant.Double))
         fields.append(QgsField(f"speed_{speed_units}", QVariant.Double))
@@ -268,8 +317,8 @@ class TrajectoryManipulationAlgorithm(TrajectoriesAlgorithm):
         line = QgsGeometry.fromWkt(traj.to_linestringm_wkt())
         f = QgsFeature()
         f.setGeometry(line)
-        start_time = traj.get_start_time().isoformat()
-        end_time = traj.get_end_time().isoformat()
+        start_time = QDateTime(traj.get_start_time())
+        end_time = QDateTime(traj.get_end_time())
         duration = float(traj.get_duration().total_seconds())
         length = traj.get_length(units=self.speed_units[0])
         speed = length / (duration / TIME_FACTOR[self.speed_units[1]])
@@ -294,16 +343,17 @@ class TrajectoryManipulationAlgorithm(TrajectoriesAlgorithm):
 
     def tc_to_sink(self, tc, field_names_to_add=[]):
         try:
-            gdf = tc.to_point_gdf()
+            dfs = tc.to_point_gdf()
         except ValueError:  # when the tc is empty
             return
-        gdf[self.timestamp_field] = gdf.index.astype(str)
+        dfs[self.timestamp_field] = dfs.index
+
         names = [field.name() for field in self.fields_pts]
         for field_name in field_names_to_add:
             names.append(field_name)      
         names.append("geometry")
-        gdf = gdf[names]
+        dfs = dfs[names]
 
-        for _, row in gdf.iterrows():
+        for _, row in dfs.iterrows():
             f = feature_from_gdf_row(row)
             self.sink_pts.addFeature(f, QgsFeatureSink.FastInsert)

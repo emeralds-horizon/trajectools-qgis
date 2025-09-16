@@ -1,7 +1,8 @@
+import os
 import sys
 
-import shapely.wkt
-from shapely.geometry import Polygon
+import pandas as pd
+from movingpandas import TrajectoryStopDetector
 
 from qgis.PyQt.QtCore import QCoreApplication, QVariant
 from qgis.core import (
@@ -18,13 +19,13 @@ from qgis.core import (
 )
 from qgis.core import QgsMessageLog, Qgis
 
-import pandas as pd
-from movingpandas import TrajectoryStopDetector
-
 sys.path.append("..")
 
-from .trajectoriesAlgorithm import TrajectoriesAlgorithm
+from .trajectoriesAlgorithm import TrajectoriesAlgorithm, help_str_base
 from .qgisUtils import feature_from_gdf_row
+
+
+CPU_COUNT = os.cpu_count()
 
 
 class ExtractODPtsAlgorithm(TrajectoriesAlgorithm):
@@ -64,17 +65,19 @@ class ExtractODPtsAlgorithm(TrajectoriesAlgorithm):
         return self.tr("Extract OD points")
 
     def shortHelpString(self):
-        return self.tr("<p>Extracts start and/or end points of trajectories.</p>")
+        return self.tr("<p>Extracts start and/or end points of trajectories.</p>"+help_str_base)
 
     def processAlgorithm(self, parameters, context, feedback):
         tc, crs = self.create_tc(parameters, context)
 
-        self.fields_pts = self.get_pt_fields(
-            [
+        fields_to_add = []
+        if self.add_metrics:
+            fields_to_add = [
                 QgsField(tc.get_speed_col(), QVariant.Double),
                 QgsField(tc.get_direction_col(), QVariant.Double),
-            ],
-        )
+            ]
+        self.fields_pts = self.get_pt_fields(fields_to_add)
+
         (self.sink_orig, self.orig_pts) = self.parameterAsSink(
             parameters,
             self.ORIGIN_PTS,
@@ -107,7 +110,7 @@ class ExtractODPtsAlgorithm(TrajectoriesAlgorithm):
         names.append("geometry")
         gdf = gdf[names]
         # QgsMessageLog.logMessage(str(gdf), "Trajectools", level=Qgis.Info )
-
+                
         for _, row in gdf.iterrows():
             f = feature_from_gdf_row(row)
             self.sink_orig.addFeature(f, QgsFeatureSink.FastInsert)
@@ -172,15 +175,15 @@ class ExtractStopsAlgorithm(TrajectoriesAlgorithm):
         return self.tr("Extract stop points")
 
     def shortHelpString(self):
-        return self.tr("<p>Extracts stop points from trajectories.</p>")
+        return self.tr("<p>Extracts stop points from trajectories.</p>"+help_str_base)
 
     def processAlgorithm(self, parameters, context, feedback):
         tc, crs = self.create_tc(parameters, context)
 
         self.fields_pts = QgsFields()
         self.fields_pts.append(QgsField("stop_id", QVariant.String))
-        self.fields_pts.append(QgsField("start_time", QVariant.String))  # .DateTime))
-        self.fields_pts.append(QgsField("end_time", QVariant.String))  # .DateTime))
+        self.fields_pts.append(QgsField("start_time", QVariant.DateTime))
+        self.fields_pts.append(QgsField("end_time", QVariant.DateTime))
         self.fields_pts.append(QgsField("traj_id", QVariant.String))
         self.fields_pts.append(QgsField("duration_s", QVariant.Double))
 
@@ -202,13 +205,15 @@ class ExtractStopsAlgorithm(TrajectoriesAlgorithm):
         min_duration = self.parameterAsString(parameters, self.MIN_DURATION, context)
         min_duration = pd.Timedelta(min_duration).to_pytimedelta()
 
-        gdf = TrajectoryStopDetector(tc).get_stop_points(
-            max_diameter=max_diameter, min_duration=min_duration
-        )
+        try: 
+            gdf = TrajectoryStopDetector(tc, n_processes=CPU_COUNT).get_stop_points(
+                max_diameter=max_diameter, min_duration=min_duration
+            )
+        except TypeError:
+            raise TypeError("TypeError: cannot pickle 'QVariant' object. This error is usually caused by None values in input layer fields. Try to remove None values or run without Add movement metrics.")
+          
         gdf = gdf.convert_dtypes()
         gdf["stop_id"] = gdf.index.astype(str)
-        gdf["start_time"] = gdf["start_time"].astype(str)
-        gdf["end_time"] = gdf["end_time"].astype(str)
 
         names = [field.name() for field in self.fields_pts]
         names.append("geometry")

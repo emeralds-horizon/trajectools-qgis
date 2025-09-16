@@ -13,7 +13,7 @@ from qgis.core import (
 
 sys.path.append("..")
 
-from .trajectoriesAlgorithm import TrajectoryManipulationAlgorithm
+from .trajectoriesAlgorithm import TrajectoryManipulationAlgorithm, help_str_base, help_str_traj
 
 
 class OverlayTrajectoriesAlgorithm(TrajectoryManipulationAlgorithm):
@@ -51,11 +51,7 @@ class ClipTrajectoriesByExtentAlgorithm(OverlayTrajectoriesAlgorithm):
         return self.tr(
             "<p>Creates a trajectory point layers with speed and direction information "
             "as well as a trajectory line layer clipped by the specified extent.</p>"
-            "<p><b>Speed</b> is calculated based on the input layer CRS information and "
-            "converted to the desired speed units. For more info on the supported units, "
-            "see https://movingpandas.org/units</p>"
-            "<p><b>Direction</b> is calculated between consecutive locations. Direction "
-            "values are in degrees, starting North turning clockwise.</p>"
+            ""+help_str_base+help_str_traj
         )
 
     def helpUrl(self):
@@ -96,11 +92,7 @@ class ClipTrajectoriesByPolygonLayerAlgorithm(OverlayTrajectoriesAlgorithm):
         return self.tr(
             "<p>Creates a trajectory point layers with speed and direction information "
             "as well as a trajectory line layer clipped by the specified vector layer.</p>"
-            "<p><b>Speed</b> is calculated based on the input layer CRS information and "
-            "converted to the desired speed units. For more info on the supported units, "
-            "see https://movingpandas.org/units</p>"
-            "<p><b>Direction</b> is calculated between consecutive locations. Direction "
-            "values are in degrees, starting North turning clockwise.</p>"
+            ""+help_str_base+help_str_traj
         )
 
     def helpUrl(self):
@@ -149,23 +141,20 @@ class IntersectWithPolygonLayerAlgorithm(OverlayTrajectoriesAlgorithm):
         return self.tr(
             "<p>Creates a trajectory point layers with speed and direction information "
             "as well as a trajectory line layer which ihntersects the specified vector layer.</p>"
-            "<p><b>Speed</b> is calculated based on the input layer CRS information and "
-            "converted to the desired speed units. For more info on the supported units, "
-            "see https://movingpandas.org/units</p>"
-            "<p><b>Direction</b> is calculated between consecutive locations. Direction "
-            "values are in degrees, starting North turning clockwise.</p>"
+            ""+help_str_base+help_str_traj
         )
 
     def helpUrl(self):
         return "https://movingpandas.org/units"
 
     def setup_pt_sink(self, parameters, context, tc, crs):        
-        self.fields_pts = self.get_pt_fields(
-            [
+        fields_to_add = []
+        if self.add_metrics:
+            fields_to_add = [
                 QgsField(tc.get_speed_col(), QVariant.Double),
                 QgsField(tc.get_direction_col(), QVariant.Double),
-            ],
-        )
+            ]
+        self.fields_pts = self.get_pt_fields(fields_to_add)
 
         vlayer = self.parameterAsVectorLayer(parameters, self.OVERLAY_LAYER, context)
         for field in vlayer.fields():
